@@ -1,0 +1,431 @@
+File "cv_step6V_recovery_delivery_vuln.cv", line 189, characters 13-17:
+Warning: identifier tok2 rebound
+Doing expand get, insert and prove unique annotations... Done.
+Doing simplify (non-expanded game)... No change.
+Doing expand... Done.
+Doing remove assignments of findcond... Done.
+Doing simplify... Run simplify 1 time(s). Fixpoint reached.
+No change.
+Doing move all binders... No change.
+Doing SA rename new without array accesses and remove assignments of findcond... No change.
+Doing merge branches... No change.
+Proved query forall ep: nonce; event(RecoveryEvt(A, ep)) ==> event(LaunchEvt(A, ep))
+Proof of forall uid: uid_t; inj-event(AcceptBEvt(B, uid)) ==> inj-event(SendAppEvt(A, S, B, uid)) failed:
+  Found AcceptBEvt(b_2, uid_4) at 263
+  but could not prove inj-event(SendAppEvt(A, S, B, uid))
+Proved query forall tok: token_t; event(AcceptResume(A, S, tok)) ==> event(IssueToken(A, S, tok))
+===================== Proof starts =======================
+Initial state
+Game 1 is
+     ((
+       a_launch_in(uL: unit) :=
+       ep <-R nonce;
+       insert live_epoch(A, ep);
+       event LaunchEvt(A, ep)
+     ) | (
+       foreach iF <= NFORCE do
+       a_force_in(uF: unit) :=
+       get live_epoch(hL: host, eL: nonce) suchthat hL = A in
+       insert dead_epoch(A, eL);
+       event ForceStopEvt(A, eL)
+     ) | (
+       foreach iRec <= NREC do
+       a_reconnect_in(uR: unit) :=
+       get live_epoch(hL_1: host, eL_1: nonce) suchthat hL_1 = A in
+       event ReconnectEvt(A, eL_1);
+       get dead_epoch(hD: host, eD: nonce) suchthat (hD = A) && (eD = eL_1) in
+         yield
+       else
+         event RecoveryEvt(A, eL_1)
+     ) | (
+       foreach iC <= NC do
+       c_start_in(t: startmsg) :=
+       na_1 <-R nonce;
+       xa <-R exponent;
+       gx: groupelt <- g(xa);
+       naA: nonce <- na_1;
+       gxA: groupelt <- gx;
+       return(na_1, gx);
+       c_m2_in(ns_2: nonce, gy_1: groupelt, pks_1: pkey, sigS_1: sig_t) :=
+       nsA: nonce <- ns_2;
+       gyA: groupelt <- gy_1;
+       pksS: pkey <- pk(skS);
+       pksA: pkey <- pksS;
+       return(finishA);
+       c_m4_in(fs: fin2msg, tok_2: token_t, sigTok_1: sig_t) :=
+       tokA: token_t <- tok_2;
+       k: key <- kdf(naA, nsA, gxA, gyA);
+       kA: key <- k;
+       psk: key <- prf_res(kA);
+       pskA: key <- psk;
+       return(ok);
+       c_send_in(u: unit) :=
+       m <-R plaintext;
+       uid_2 <-R uid_t;
+       md_2 <-R meta_t;
+       ct_1: ciphertext <- enc(m, kA, uid_2, md_2);
+       tg_1: tag_t <- tag_app(kA, uid_2, ct_1);
+       event SendAppEvt(A, S, B, uid_2);
+       return(B, ct_1, tg_1, uid_2, md_2);
+       c_resume_in(nr: nonce) :=
+       binder: binder_t <- mac_res(pskA, nr);
+       return(tokA, nr, binder)
+     ) | (
+       foreach iS <= NS do
+       s_m1_in(na_2: nonce, gx_1: groupelt) :=
+       naS: nonce <- na_2;
+       gxS: groupelt <- gx_1;
+       ns_3 <-R nonce;
+       ys <-R exponent;
+       gy_2: groupelt <- g(ys);
+       nsS: nonce <- ns_3;
+       gyS: groupelt <- gy_2;
+       pks_2: pkey <- pk(skS);
+       sigS_2: sig_t <- sign(hs_msg(naS, nsS, gxS, gyS, pks_2), skS);
+       return(nsS, gyS, pks_2, sigS_2);
+       s_m3_in(fa: fin1msg) :=
+       tok_3 <-R token_t;
+       k_1: key <- kdf(naS, nsS, gxS, gyS);
+       psk_1: key <- prf_res(k_1);
+       insert tokdb(tok_3, psk_1);
+       event IssueToken(A, S, tok_3);
+       sigTok_2: sig_t <- sign(tok_msg(naS, nsS, tok_3), skS);
+       return(finishS, tok_3, sigTok_2);
+       s_app_in(b_1: host, ct_2: ciphertext, tg_2: tag_t, uid_3: uid_t, md_3: meta_t) :=
+       event DeliverEvt(A, S, b_1, uid_3);
+       return(b_1, ct_2, uid_3, md_3)
+     ) | (
+       foreach iR <= NR do
+       s_resume_in(tok2: token_t, nr2: nonce, binder_1: binder_t) :=
+       get tokdb(tok2_1: token_t, psk2: key) suchthat true in
+         if binder_1 = mac_res(psk2, nr2) then
+           event AcceptResume(A, S, tok2_1);
+           return(ok)
+         else
+           return(ok)
+       else
+         return(ok)
+     ) | (
+       foreach iB <= NB do
+       b_deliver_in(b_2: host, ct_3: ciphertext, uid_4: uid_t, md_4: meta_t) :=
+       event AcceptBEvt(b_2, uid_4)
+     ))
+
+
+Applying expand get, insert and prove unique annotations
+  - Expand get/insert for table live_epoch
+  - Expand get/insert for table dead_epoch
+  - Expand get/insert for table tokdb
+yields
+
+Game 2 is
+     ((
+       a_launch_in(uL: unit) :=
+       ep <-R nonce;
+       live_epoch_1: host <- A;
+       live_epoch_2: nonce <- ep;
+       event LaunchEvt(A, ep)
+     ) | (
+       foreach iF <= NFORCE do
+       a_force_in(uF: unit) :=
+ {23}  if defined(live_epoch_1, live_epoch_2) && (live_epoch_1 = A) then
+       dead_epoch_1: host <- A;
+       dead_epoch_2: nonce <- live_epoch_2;
+       event ForceStopEvt(A, live_epoch_2)
+     ) | (
+       foreach iRec <= NREC do
+       a_reconnect_in(uR: unit) :=
+ {43}  if defined(live_epoch_1, live_epoch_2) && (live_epoch_1 = A) then
+       event ReconnectEvt(A, live_epoch_2);
+ {53}  find u_3 = u_4 <= NFORCE suchthat defined(dead_epoch_1[u_4], dead_epoch_2[u_4]) && (dead_epoch_1[u_4] = A) && (dead_epoch_2[u_4] = live_epoch_2) then
+         yield
+       else
+         event RecoveryEvt(A, live_epoch_2)
+     ) | (
+       foreach iC <= NC do
+       c_start_in(t: startmsg) :=
+       na_1 <-R nonce;
+       xa <-R exponent;
+       gx: groupelt <- g(xa);
+       naA: nonce <- na_1;
+       gxA: groupelt <- gx;
+       return(na_1, gx);
+       c_m2_in(ns_2: nonce, gy_1: groupelt, pks_1: pkey, sigS_1: sig_t) :=
+       nsA: nonce <- ns_2;
+       gyA: groupelt <- gy_1;
+       pksS: pkey <- pk(skS);
+       pksA: pkey <- pksS;
+       return(finishA);
+       c_m4_in(fs: fin2msg, tok_2: token_t, sigTok_1: sig_t) :=
+       tokA: token_t <- tok_2;
+       k: key <- kdf(naA, nsA, gxA, gyA);
+       kA: key <- k;
+       psk: key <- prf_res(kA);
+       pskA: key <- psk;
+       return(ok);
+       c_send_in(u: unit) :=
+       m <-R plaintext;
+       uid_2 <-R uid_t;
+       md_2 <-R meta_t;
+       ct_1: ciphertext <- enc(m, kA, uid_2, md_2);
+       tg_1: tag_t <- tag_app(kA, uid_2, ct_1);
+       event SendAppEvt(A, S, B, uid_2);
+       return(B, ct_1, tg_1, uid_2, md_2);
+       c_resume_in(nr: nonce) :=
+       binder: binder_t <- mac_res(pskA, nr);
+       return(tokA, nr, binder)
+     ) | (
+       foreach iS <= NS do
+       s_m1_in(na_2: nonce, gx_1: groupelt) :=
+       naS: nonce <- na_2;
+       gxS: groupelt <- gx_1;
+       ns_3 <-R nonce;
+       ys <-R exponent;
+       gy_2: groupelt <- g(ys);
+       nsS: nonce <- ns_3;
+       gyS: groupelt <- gy_2;
+       pks_2: pkey <- pk(skS);
+       sigS_2: sig_t <- sign(hs_msg(naS, nsS, gxS, gyS, pks_2), skS);
+       return(nsS, gyS, pks_2, sigS_2);
+       s_m3_in(fa: fin1msg) :=
+       tok_3 <-R token_t;
+       k_1: key <- kdf(naS, nsS, gxS, gyS);
+       psk_1: key <- prf_res(k_1);
+       tokdb_1: token_t <- tok_3;
+       tokdb_2: key <- psk_1;
+       event IssueToken(A, S, tok_3);
+       sigTok_2: sig_t <- sign(tok_msg(naS, nsS, tok_3), skS);
+       return(finishS, tok_3, sigTok_2);
+       s_app_in(b_1: host, ct_2: ciphertext, tg_2: tag_t, uid_3: uid_t, md_3: meta_t) :=
+       event DeliverEvt(A, S, b_1, uid_3);
+       return(b_1, ct_2, uid_3, md_3)
+     ) | (
+       foreach iR <= NR do
+       s_resume_in(tok2: token_t, nr2: nonce, binder_1: binder_t) :=
+       find u_1 = u_2 <= NS suchthat defined(tokdb_1[u_2], tokdb_2[u_2]) then
+         if binder_1 = mac_res(tokdb_2[u_1], nr2) then
+           event AcceptResume(A, S, tokdb_1[u_1]);
+           return(ok)
+         else
+           return(ok)
+       else
+         return(ok)
+     ) | (
+       foreach iB <= NB do
+       b_deliver_in(b_2: host, ct_3: ciphertext, uid_4: uid_t, md_4: meta_t) :=
+       event AcceptBEvt(b_2, uid_4)
+     ))
+
+
+Applying expand
+  - Expand if/find/let
+    - Replaced defined condition dead_epoch_1[u_4], dead_epoch_2[u_4] with dead_epoch_1[u_4] in find at 53
+    - Replaced defined condition live_epoch_1, live_epoch_2 with live_epoch_2 in find at 43
+    - Replaced defined condition live_epoch_1, live_epoch_2 with live_epoch_2 in find at 23
+yields
+
+Game 3 is
+     ((
+       a_launch_in(uL: unit) :=
+       ep <-R nonce;
+       live_epoch_1: host <- A;
+       live_epoch_2: nonce <- ep;
+       event LaunchEvt(A, ep)
+     ) | (
+       foreach iF <= NFORCE do
+       a_force_in(uF: unit) :=
+       if defined(live_epoch_2) then
+       dead_epoch_1: host <- A;
+       dead_epoch_2: nonce <- live_epoch_2
+     ) | (
+       foreach iRec <= NREC do
+       a_reconnect_in(uR: unit) :=
+       if defined(live_epoch_2) then
+       find u_3 = u_4 <= NFORCE suchthat defined(dead_epoch_1[u_4]) then
+         yield
+       else
+         event RecoveryEvt(A, live_epoch_2)
+     ) | (
+       foreach iC <= NC do
+       c_start_in(t: startmsg) :=
+       na_1 <-R nonce;
+       xa <-R exponent;
+       gx: groupelt <- g(xa);
+       naA: nonce <- na_1;
+       gxA: groupelt <- gx;
+       return(na_1, gx);
+       c_m2_in(ns_2: nonce, gy_1: groupelt, pks_1: pkey, sigS_1: sig_t) :=
+       nsA: nonce <- ns_2;
+       gyA: groupelt <- gy_1;
+       pksS: pkey <- pk(skS);
+       pksA: pkey <- pksS;
+       return(finishA);
+       c_m4_in(fs: fin2msg, tok_2: token_t, sigTok_1: sig_t) :=
+       tokA: token_t <- tok_2;
+       k: key <- kdf(naA, nsA, gxA, gyA);
+       kA: key <- k;
+       psk: key <- prf_res(kA);
+       pskA: key <- psk;
+       return(ok);
+       c_send_in(u: unit) :=
+       m <-R plaintext;
+       uid_2 <-R uid_t;
+       md_2 <-R meta_t;
+       ct_1: ciphertext <- enc(m, kA, uid_2, md_2);
+       tg_1: tag_t <- tag_app(kA, uid_2, ct_1);
+       event SendAppEvt(A, S, B, uid_2);
+       return(B, ct_1, tg_1, uid_2, md_2);
+       c_resume_in(nr: nonce) :=
+       binder: binder_t <- mac_res(pskA, nr);
+       return(tokA, nr, binder)
+     ) | (
+       foreach iS <= NS do
+       s_m1_in(na_2: nonce, gx_1: groupelt) :=
+       naS: nonce <- na_2;
+       gxS: groupelt <- gx_1;
+       ns_3 <-R nonce;
+       ys <-R exponent;
+       gy_2: groupelt <- g(ys);
+       nsS: nonce <- ns_3;
+       gyS: groupelt <- gy_2;
+       pks_2: pkey <- pk(skS);
+       sigS_2: sig_t <- sign(hs_msg(naS, nsS, gxS, gyS, pks_2), skS);
+       return(nsS, gyS, pks_2, sigS_2);
+       s_m3_in(fa: fin1msg) :=
+       tok_3 <-R token_t;
+       k_1: key <- kdf(naS, nsS, gxS, gyS);
+       psk_1: key <- prf_res(k_1);
+       tokdb_1: token_t <- tok_3;
+       tokdb_2: key <- psk_1;
+       event IssueToken(A, S, tok_3);
+       sigTok_2: sig_t <- sign(tok_msg(naS, nsS, tok_3), skS);
+       return(finishS, tok_3, sigTok_2);
+       s_app_in(b_1: host, ct_2: ciphertext, tg_2: tag_t, uid_3: uid_t, md_3: meta_t) :=
+       return(b_1, ct_2, uid_3, md_3)
+     ) | (
+       foreach iR <= NR do
+       s_resume_in(tok2: token_t, nr2: nonce, binder_1: binder_t) :=
+       find u_1 = u_2 <= NS suchthat defined(tokdb_1[u_2], tokdb_2[u_2]) then
+         if binder_1 = mac_res(tokdb_2[u_1], nr2) then
+           event AcceptResume(A, S, tokdb_1[u_1]);
+           return(ok)
+         else
+           return(ok)
+       else
+         return(ok)
+     ) | (
+       foreach iB <= NB do
+       b_deliver_in(b_2: host, ct_3: ciphertext, uid_4: uid_t, md_4: meta_t) :=
+       event AcceptBEvt(b_2, uid_4)
+     ))
+
+
+Applying remove assignments of findcond
+  - Remove assignments on naS (definition removed, all usages removed)
+  - Remove assignments on gxS (definition removed, all usages removed)
+  - Remove assignments on nsS (definition removed, all usages removed)
+  - Remove assignments on gyS (definition removed, all usages removed)
+  - Remove assignments on tokdb_1 (definition removed, all usages removed)
+  - Remove assignments on tokdb_2 (definition removed, all usages removed)
+  - Remove assignments on naA (definition removed, all usages removed)
+  - Remove assignments on gxA (definition removed, all usages removed)
+  - Remove assignments on nsA (definition removed, all usages removed)
+  - Remove assignments on gyA (definition removed, all usages removed)
+  - Remove assignments on pksA (definition removed, all usages removed)
+  - Remove assignments on tokA (definition removed, all usages removed)
+  - Remove assignments on kA (definition removed, all usages removed)
+  - Remove assignments on pskA (definition removed, all usages removed)
+  - Remove assignments on dead_epoch_1 (definition point kept, all usages removed)
+  - Remove assignments on dead_epoch_2 (definition removed, all usages removed)
+  - Remove assignments on live_epoch_1 (definition removed, all usages removed)
+  - Remove assignments on live_epoch_2 (definition removed, all usages removed)
+  - Remove assignments on pksS (definition removed, all usages removed)
+yields
+
+Game 4 is
+     ((
+       a_launch_in(uL: unit) :=
+       ep <-R nonce;
+       event LaunchEvt(A, ep)
+     ) | (
+       foreach iF <= NFORCE do
+       a_force_in(uF: unit) :=
+       if defined(ep) then
+       dead_epoch_1: host <- cst_host
+     ) | (
+       foreach iRec <= NREC do
+       a_reconnect_in(uR: unit) :=
+       if defined(ep) then
+       find u_3 = u_4 <= NFORCE suchthat defined(dead_epoch_1[u_4]) then
+         yield
+       else
+         event RecoveryEvt(A, ep)
+     ) | (
+       foreach iC <= NC do
+       c_start_in(t: startmsg) :=
+       na_1 <-R nonce;
+       xa <-R exponent;
+       gx: groupelt <- g(xa);
+       return(na_1, gx);
+       c_m2_in(ns_2: nonce, gy_1: groupelt, pks_1: pkey, sigS_1: sig_t) :=
+       return(finishA);
+       c_m4_in(fs: fin2msg, tok_2: token_t, sigTok_1: sig_t) :=
+       k: key <- kdf(na_1, ns_2, gx, gy_1);
+       psk: key <- prf_res(k);
+       return(ok);
+       c_send_in(u: unit) :=
+       m <-R plaintext;
+       uid_2 <-R uid_t;
+       md_2 <-R meta_t;
+       ct_1: ciphertext <- enc(m, k, uid_2, md_2);
+       tg_1: tag_t <- tag_app(k, uid_2, ct_1);
+       event SendAppEvt(A, S, B, uid_2);
+       return(B, ct_1, tg_1, uid_2, md_2);
+       c_resume_in(nr: nonce) :=
+       binder: binder_t <- mac_res(psk, nr);
+       return(tok_2, nr, binder)
+     ) | (
+       foreach iS <= NS do
+       s_m1_in(na_2: nonce, gx_1: groupelt) :=
+       ns_3 <-R nonce;
+       ys <-R exponent;
+       gy_2: groupelt <- g(ys);
+       pks_2: pkey <- pk(skS);
+       sigS_2: sig_t <- sign(hs_msg(na_2, ns_3, gx_1, gy_2, pks_2), skS);
+       return(ns_3, gy_2, pks_2, sigS_2);
+       s_m3_in(fa: fin1msg) :=
+       tok_3 <-R token_t;
+       k_1: key <- kdf(na_2, ns_3, gx_1, gy_2);
+       psk_1: key <- prf_res(k_1);
+       event IssueToken(A, S, tok_3);
+       sigTok_2: sig_t <- sign(tok_msg(na_2, ns_3, tok_3), skS);
+       return(finishS, tok_3, sigTok_2);
+       s_app_in(b_1: host, ct_2: ciphertext, tg_2: tag_t, uid_3: uid_t, md_3: meta_t) :=
+       return(b_1, ct_2, uid_3, md_3)
+     ) | (
+       foreach iR <= NR do
+       s_resume_in(tok2: token_t, nr2: nonce, binder_1: binder_t) :=
+       find u_1 = u_2 <= NS suchthat defined(tok_3[u_2], psk_1[u_2]) then
+         if binder_1 = mac_res(psk_1[u_1], nr2) then
+           event AcceptResume(A, S, tok_3[u_1]);
+           return(ok)
+         else
+           return(ok)
+       else
+         return(ok)
+     ) | (
+       foreach iB <= NB do
+       b_deliver_in(b_2: host, ct_3: ciphertext, uid_4: uid_t, md_4: meta_t) :=
+       event AcceptBEvt(b_2, uid_4)
+     ))
+
+
+Proved forall tok: token_t; event(AcceptResume(A, S, tok)) ==> event(IssueToken(A, S, tok)) in game 4
+Proved forall ep: nonce; event(RecoveryEvt(A, ep)) ==> event(LaunchEvt(A, ep)) in game 4
+Adv[Game 1: forall tok: token_t; event(AcceptResume(A, S, tok)) ==> event(IssueToken(A, S, tok))] <= Adv[Game 4: forall tok: token_t; event(AcceptResume(A, S, tok)) ==> event(IssueToken(A, S, tok))]
+Adv[Game 4: forall tok: token_t; event(AcceptResume(A, S, tok)) ==> event(IssueToken(A, S, tok))] <= 0
+RESULT Proved forall tok: token_t; event(AcceptResume(A, S, tok)) ==> event(IssueToken(A, S, tok))
+Adv[Game 1: forall ep: nonce; event(RecoveryEvt(A, ep)) ==> event(LaunchEvt(A, ep))] <= Adv[Game 4: forall ep: nonce; event(RecoveryEvt(A, ep)) ==> event(LaunchEvt(A, ep))]
+Adv[Game 4: forall ep: nonce; event(RecoveryEvt(A, ep)) ==> event(LaunchEvt(A, ep))] <= 0
+RESULT Proved forall ep: nonce; event(RecoveryEvt(A, ep)) ==> event(LaunchEvt(A, ep))
+RESULT Could not prove forall uid: uid_t; inj-event(AcceptBEvt(B, uid)) ==> inj-event(SendAppEvt(A, S, B, uid)).

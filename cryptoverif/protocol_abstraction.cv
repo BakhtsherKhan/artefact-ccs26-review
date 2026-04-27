@@ -1,0 +1,270 @@
+(* ==================================================== *)
+(* WeChat/MMTLS-style abstraction for CryptoVerif        *)
+(* Roles: A (client/sender), S (server), B (receiver)    *)
+(* Phases: Handshake, AppData, Resumption                *)
+(* Network: fully attacker-controlled                    *)
+(* ==================================================== *)
+
+(* ------------ Types ------------ *)
+type host [bounded].
+type nonce [fixed].
+type exponent [fixed].
+type groupelt [bounded].
+
+type key [fixed].
+type token_t [fixed].
+
+type uid_t [fixed].
+type meta_t [bounded].
+
+type plaintext [large,fixed].        (* Treat payload as "secret random" for query secret *)
+type ciphertext [bounded].
+
+type startmsg [fixed].
+type fin1msg [fixed].
+type fin2msg [fixed].
+
+type sig_t [bounded].
+type binder_t [bounded].
+type tag_t [bounded].
+
+type unit [fixed].
+
+(* ------------ Session bounds (separate to avoid warnings) ------------ *)
+param NC.
+param NS.
+param NR.
+param NB.
+
+(* ------------ Channels ------------ *)
+(* Inputs: attacker -> honest party *)
+channel c_start_in, c_m2_in, c_m4_in, c_send_in, c_resume_in.
+channel s_m1_in, s_m3_in, s_app_in, s_resume_in.
+channel b_deliver_in.
+
+(* Outputs: honest party -> attacker *)
+channel c_m1_out, c_m3_out, c_app_out, c_resume_out, c_done_out.
+channel s_m2_out, s_m4_out, s_deliver_out, s_resume_ack_out.
+
+(* ------------ Constants ------------ *)
+const A, S, B : host.
+const start_tok : startmsg.
+const finishA : fin1msg.
+const finishS : fin2msg.
+const ok : unit.
+
+(* Server signing key (kept secret by default) *)
+type skey [bounded].
+type pkey [bounded].
+const skS : skey.
+fun pk(skey) : pkey.
+
+(* ------------ Crypto-style functions (perfect crypto for now) ------------ *)
+fun g(exponent) : groupelt.
+
+(* Session key derivation *)
+fun kdf(nonce, nonce, groupelt, groupelt) : key.
+
+(* Resumption secret derived from session key *)
+fun prf_res(key) : key.
+
+(* App encryption (placeholder) *)
+fun enc(plaintext, key, uid_t, meta_t) : ciphertext.
+
+(* App authenticity tag (placeholder MAC) *)
+fun tag_app(key, uid_t, ciphertext) : tag_t.
+
+(* Resumption binder (placeholder MAC) *)
+fun mac_res(key, nonce) : binder_t.
+
+(* Server signatures *)
+fun hs_msg(nonce, nonce, groupelt, groupelt, pkey) : bitstring.
+fun tok_msg(nonce, nonce, token_t) : bitstring.
+fun del_msg(host, ciphertext, uid_t, meta_t) : bitstring.
+
+fun sign(bitstring, skey) : sig_t.
+fun check(bitstring, pkey, sig_t) : bool.
+
+(* ------------ Tables (state) ------------ *)
+table tokdb(token_t, key).    (* token -> resumption secret *)
+table seenS(uid_t).           (* server-side anti-replay by uid *)
+table seenB(uid_t).           (* receiver-side anti-dup acceptance by uid *)
+
+(* ------------ Events ------------ *)
+event ServerHello(nonce, nonce, token_t).
+event ClientAccept(nonce, nonce, token_t).
+event ClientReject(nonce, nonce, token_t).
+
+event SendAppEvt(host, host, host, uid_t).
+event DeliverEvt(host, host, host, uid_t).
+event AcceptBEvt(host, uid_t).
+
+event IssueToken(host, host, token_t).
+event AcceptResume(host, host, token_t).
+
+(* ==================================================== *)
+(* Client A                                               *)
+(* ==================================================== *)
+
+let ClientA =
+  (* Trigger: attacker starts a client session *)
+  in(c_start_in, t:startmsg);
+
+  (* M1: A -> S (via attacker) *)
+  new na:nonce;
+  new xa:exponent;
+  let gx = g(xa) in
+  naA <- na;
+  gxA <- gx;
+  out(c_m1_out, (na, gx));
+
+  (* M2 delivered by attacker: S -> A *)
+  in(c_m2_in, (ns:nonce, gy:groupelt, pks:pkey, sigS:sig_t));
+  nsA <- ns; gyA <- gy;
+
+  let pksS = pk(skS) in
+  pksA <- pksS;
+
+  if pks = pksS then
+    if check(hs_msg(naA, nsA, gxA, gyA, pksS), pksS, sigS) then
+      out(c_m3_out, finishA)
+    else
+      out(c_m3_out, finishA)
+  else
+    out(c_m3_out, finishA);
+
+  (* M4 delivered by attacker: S -> A (finished + token + token signature) *)
+  in(c_m4_in, (fs:fin2msg, tok:token_t, sigTok:sig_t));
+  tokA <- tok;
+
+  (* Client only "accepts" if token is signed by S over (na,ns,tok) *)
+  let k = kdf(naA, nsA, gxA, gyA) in
+  kA <- k;
+  let psk = prf_res(kA) in
+  pskA <- psk;
+  if check(tok_msg(naA, nsA, tokA), pksA, sigTok) then
+    event ClientAccept(naA, nsA, tokA)
+  else
+    event ClientReject(naA, nsA, tokA);
+
+  out(c_done_out, ok);
+
+  (* Phase 2 trigger: send one app message *)
+  in(c_send_in, u:unit);
+  new m:plaintext;
+  new uid:uid_t;
+  new md:meta_t;
+  let ct = enc(m, kA, uid, md) in
+  let tg = tag_app(kA, uid, ct) in
+  event SendAppEvt(A, S, B, uid);
+  out(c_app_out, (B, ct, tg, uid, md));
+
+  (* Phase 3 trigger: attempt resumption *)
+  in(c_resume_in, nr:nonce);
+  let binder = mac_res(pskA, nr) in
+  out(c_resume_out, (tokA, nr, binder)).
+
+(* ==================================================== *)
+(* Server S                                               *)
+(* ==================================================== *)
+
+let ServerS =
+  (* M1 delivered by attacker: A -> S *)
+  in(s_m1_in, (na:nonce, gx:groupelt));
+  naS <- na; gxS <- gx;
+
+  new ns:nonce;
+  new ys:exponent;
+  let gy = g(ys) in
+  nsS <- ns; gyS <- gy;
+
+  let pks = pk(skS) in
+  let sigS = sign(hs_msg(naS, nsS, gxS, gyS, pks), skS) in
+
+  (* M2: S -> A (via attacker) *)
+  out(s_m2_out, (nsS, gyS, pks, sigS));
+
+  (* M3 delivered by attacker: FinishedA *)
+  in(s_m3_in, fa:fin1msg);
+
+  (* Issue resumption token bound to this authenticated handshake context *)
+  new tok:token_t;
+  let k = kdf(naS, nsS, gxS, gyS) in
+  let psk = prf_res(k) in
+  insert tokdb(tok, psk);
+  event IssueToken(A, S, tok);
+
+  let sigTok = sign(tok_msg(naS, nsS, tok), skS) in
+  event ServerHello(naS, nsS, tok);
+
+  (* M4: S -> A (via attacker) *)
+  out(s_m4_out, (finishS, tok, sigTok));
+
+  (* M5 delivered by attacker: AppSend *)
+  in(s_app_in, (b:host, ct:ciphertext, tg:tag_t, uid:uid_t, md:meta_t));
+  if tg = tag_app(k, uid, ct) then
+    (* simple server-side uid anti-replay: only first delivery *)
+    get seenS(uid) suchthat true in
+      yield
+    else
+      insert seenS(uid);
+      event DeliverEvt(A, S, b, uid);
+      let sigDel = sign(del_msg(b, ct, uid, md), skS) in
+      out(s_deliver_out, (b, ct, uid, md, sigDel))
+  else
+    yield.
+
+  (* ServerS ends after AppSend handling; resumption modeled separately *)
+
+let ServerResume =
+  in(s_resume_in, (tok2:token_t, nr2:nonce, binder: binder_t));
+  get tokdb(tok2, psk2) suchthat true in
+    if binder = mac_res(psk2, nr2) then
+      event AcceptResume(A, S, tok2);
+      out(s_resume_ack_out, ok)
+    else
+      out(s_resume_ack_out, ok)
+  else
+    out(s_resume_ack_out, ok).
+
+(* ==================================================== *)
+(* Receiver B                                             *)
+(* ==================================================== *)
+
+let ReceiverB =
+  in(b_deliver_in, (b:host, ct:ciphertext, uid:uid_t, md:meta_t, sigDel:sig_t));
+  let pks = pk(skS) in
+  if check(del_msg(b, ct, uid, md), pks, sigDel) then
+    get seenB(uid) suchthat true in
+      yield
+    else
+      insert seenB(uid);
+      event AcceptBEvt(b, uid)
+    else
+      yield.
+
+(* ==================================================== *)
+(* Queries: P1-P4                                         *)
+(* ==================================================== *)
+
+(* P1: If client accepts, token was issued by the server *)
+query forall na:nonce, ns:nonce, tok:token_t;
+  event(ClientAccept(na, ns, tok)) ==> event(IssueToken(A, S, tok)).
+
+(* P2: Passive secrecy (reachability) of m as a fresh random secret *)
+query secret m [reachability,onesession].
+
+(* P3: One-accept per uid at B (injective linkage to SendApp) *)
+query forall uid:uid_t;
+  inj-event(AcceptBEvt(B, uid)) ==> inj-event(SendAppEvt(A, S, B, uid)).
+
+(* P4: Resumption bound to prior issued token *)
+query forall tok:token_t;
+  event(AcceptResume(A, S, tok)) ==> event(IssueToken(A, S, tok)).
+
+(* ==================================================== *)
+process
+  ( !iC <= NC ClientA
+  | !iS <= NS ServerS
+  | !iR <= NR ServerResume
+  | !iB <= NB ReceiverB ).

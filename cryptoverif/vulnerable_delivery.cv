@@ -1,0 +1,177 @@
+(* ==================================================== *)
+(* Step 5V: Delivery model (VULNERABLE)                   *)
+(* Focus: uid injective delivery SHOULD FAIL              *)
+(* ==================================================== *)
+
+type host [bounded].
+type nonce [fixed].
+type exponent [fixed].
+type groupelt [bounded].
+
+type key [fixed].
+type token_t [fixed].
+
+type uid_t [fixed].
+type meta_t [bounded].
+
+type plaintext [large,fixed].
+type ciphertext [bounded].
+
+type startmsg [fixed].
+type fin1msg [fixed].
+type fin2msg [fixed].
+
+type sig_t [bounded].
+type binder_t [bounded].
+type tag_t [bounded].
+type unit [fixed].
+
+param NC.
+param NS.
+param NR.
+param NB.
+
+(* Inputs: attacker -> honest party *)
+channel c_start_in, c_m2_in, c_m4_in, c_send_in, c_resume_in.
+channel s_m1_in, s_m3_in, s_app_in, s_resume_in.
+channel b_deliver_in.
+
+(* Outputs: honest party -> attacker *)
+channel c_m1_out, c_m3_out, c_app_out, c_resume_out, c_done_out.
+channel s_m2_out, s_m4_out, s_deliver_out, s_resume_ack_out.
+
+const A, S, B : host.
+const start_tok : startmsg.
+const finishA : fin1msg.
+const finishS : fin2msg.
+const ok : unit.
+
+type skey [bounded].
+type pkey [bounded].
+const skS : skey.
+fun pk(skey) : pkey.
+
+fun g(exponent) : groupelt.
+fun kdf(nonce, nonce, groupelt, groupelt) : key.
+fun prf_res(key) : key.
+fun enc(plaintext, key, uid_t, meta_t) : ciphertext.
+fun tag_app(key, uid_t, ciphertext) : tag_t.
+fun mac_res(key, nonce) : binder_t.
+
+fun hs_msg(nonce, nonce, groupelt, groupelt, pkey) : bitstring.
+fun tok_msg(nonce, nonce, token_t) : bitstring.
+fun del_msg(host, ciphertext, uid_t, meta_t) : bitstring.
+
+fun sign(bitstring, skey) : sig_t.
+fun check(bitstring, pkey, sig_t) : bool.
+
+table tokdb(token_t, key).
+
+event SendAppEvt(host, host, host, uid_t).
+event DeliverEvt(host, host, host, uid_t).
+event AcceptBEvt(host, uid_t).
+event IssueToken(host, host, token_t).
+event AcceptResume(host, host, token_t).
+
+(* ---------------- Client A ---------------- *)
+let ClientA =
+  in(c_start_in, t:startmsg);
+
+  (* M1 *)
+  new na:nonce;
+  new xa:exponent;
+  let gx = g(xa) in
+  naA <- na; gxA <- gx;
+  out(c_m1_out, (na, gx));
+
+  (* M2 *)
+  in(c_m2_in, (ns:nonce, gy:groupelt, pks:pkey, sigS:sig_t));
+  nsA <- ns; gyA <- gy;
+  let pksS = pk(skS) in
+  pksA <- pksS;
+  out(c_m3_out, finishA);
+
+  (* M4 *)
+  in(c_m4_in, (fs:fin2msg, tok:token_t, sigTok:sig_t));
+  tokA <- tok;
+  let k = kdf(naA, nsA, gxA, gyA) in
+  kA <- k;
+  let psk = prf_res(kA) in
+  pskA <- psk;
+  out(c_done_out, ok);
+
+  (* Phase 2: send one app message *)
+  in(c_send_in, u:unit);
+  new m:plaintext;
+  new uid:uid_t;
+  new md:meta_t;
+  let ct = enc(m, kA, uid, md) in
+  let tg = tag_app(kA, uid, ct) in
+  event SendAppEvt(A, S, B, uid);
+  out(c_app_out, (B, ct, tg, uid, md));
+
+  (* Phase 3: resumption attempt *)
+  in(c_resume_in, nr:nonce);
+  let binder = mac_res(pskA, nr) in
+  out(c_resume_out, (tokA, nr, binder)).
+
+(* ---------------- Server S ---------------- *)
+let ServerS =
+  in(s_m1_in, (na:nonce, gx:groupelt));
+  naS <- na; gxS <- gx;
+
+  new ns:nonce;
+  new ys:exponent;
+  let gy = g(ys) in
+  nsS <- ns; gyS <- gy;
+
+  let pks = pk(skS) in
+  let sigS = sign(hs_msg(naS, nsS, gxS, gyS, pks), skS) in
+  out(s_m2_out, (nsS, gyS, pks, sigS));
+
+  in(s_m3_in, fa:fin1msg);
+
+  new tok:token_t;
+  let k = kdf(naS, nsS, gxS, gyS) in
+  let psk = prf_res(k) in
+  insert tokdb(tok, psk);
+  event IssueToken(A, S, tok);
+
+  let sigTok = sign(tok_msg(naS, nsS, tok), skS) in
+  out(s_m4_out, (finishS, tok, sigTok));
+
+  (* VULN: server "delivers" on any app input, no uid gate *)
+  in(s_app_in, (b:host, ct:ciphertext, tg:tag_t, uid:uid_t, md:meta_t));
+  event DeliverEvt(A, S, b, uid);
+  out(s_deliver_out, (b, ct, uid, md)).
+
+(* Resumption side (kept) *)
+let ServerResume =
+  in(s_resume_in, (tok2:token_t, nr2:nonce, binder: binder_t));
+  get tokdb(tok2, psk2) suchthat true in
+    if binder = mac_res(psk2, nr2) then
+      event AcceptResume(A, S, tok2);
+      out(s_resume_ack_out, ok)
+    else
+      out(s_resume_ack_out, ok)
+  else
+    out(s_resume_ack_out, ok).
+
+(* ---------------- Receiver B ---------------- *)
+let ReceiverB =
+  (* VULN: accept any delivery; no seenB; no server gate *)
+  in(b_deliver_in, (b:host, ct:ciphertext, uid:uid_t, md:meta_t));
+  event AcceptBEvt(b, uid).
+
+(* Queries: keep only P3 and P4 (focus) *)
+query forall uid:uid_t;
+  inj-event(AcceptBEvt(B, uid)) ==> inj-event(SendAppEvt(A, S, B, uid)).
+
+query forall tok:token_t;
+  event(AcceptResume(A, S, tok)) ==> event(IssueToken(A, S, tok)).
+
+process
+  ( !iC <= NC ClientA
+  | !iS <= NS ServerS
+  | !iR <= NR ServerResume
+  | !iB <= NB ReceiverB ).
